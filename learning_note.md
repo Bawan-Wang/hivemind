@@ -258,6 +258,149 @@ opt.step()
 
 ---
 
+## 訓練 vs 推論
+
+Hivemind 是**通用的分散式深度學習基礎設施**，訓練和推論都在它的設計範圍內。
+
+| 功能 | 支援 | 使用元件 |
+|------|------|---------|
+| 協作訓練（梯度同步） | ✅ | `Optimizer` + `DecentralizedAverager` |
+| 分散推論（MoE forward） | ✅ | `RemoteExpert` + `Server` |
+| 分散 fine-tuning | ✅ | 兩者結合（Petals 的做法） |
+
+`RemoteExpert` 可以只做 forward，不做 backward：
+
+```python
+with torch.no_grad():
+    output = remote_expert(input_tensor)  # 送到遠端機器計算，拿回結果
+```
+
+對比普通 PyTorch 訓練：
+
+| 項目 | 普通訓練 | Hivemind 協作訓練 |
+|------|---------|-----------------|
+| optimizer.step() | 每個 batch | 累積到 `target_batch_size` 才真正 update |
+| 機器同步要求 | torchrun 需全員同時上線 | 機器隨時可加入或離開 |
+| 網路要求 | 同一內網 | 可跨網際網路 |
+| 容錯性 | master node 掛掉全停 | 任一節點離線其他人繼續 |
+| LR Scheduler | 依 step 計數 | 依 `optimizer.local_epoch` 計數 |
+
+---
+
+## 執行方式
+
+### 安裝
+
+```bash
+# 1. 安裝 PyTorch（依 CUDA 版本調整）
+pip install torch
+
+# 2. 從原始碼安裝（自動編譯 proto + 下載 p2pd binary）
+cd hivemind
+pip install -e .
+
+# 3. 驗證
+python -c "import hivemind; print(hivemind.__version__)"
+```
+
+> **注意**：建議使用 Python 3.10 或 3.11 的虛擬環境，Python 3.13 在部分依賴（如 uvloop）可能有相容性問題。
+
+### 需要幾台機器？
+
+**1 台**就可以跑（開發 / 測試）：
+
+```python
+# 同一台機器，兩個 process 互相連線
+dht1 = hivemind.DHT(start=True)
+dht2 = hivemind.DHT(initial_peers=dht1.get_visible_maddrs(), start=True)
+```
+
+實際用途的建議最低規格：
+
+| 用途 | 最少機器數 | 說明 |
+|------|-----------|------|
+| 開發 / 測試 | 1 台 | 多個 process 模擬多節點 |
+| 模型太大放不下（MoE） | 1 台多卡 | 不同 GPU 托管不同 layers |
+| 跨機器 MoE 推論 | 2 台+ | A 跑前半 layers，B 跑後半 layers |
+| 協作訓練（有意義的加速） | 2 台+ | 1 台訓練沒有「協作」可言 |
+
+### 2 台的標準配置
+
+**機器 A — 啟動 Bootstrap 節點並訓練**
+
+```bash
+# 啟動 DHT bootstrap
+hivemind-dht --host_maddrs /ip4/0.0.0.0/tcp/31337
+# 輸出：/ip4/140.112.x.x/tcp/31337/p2p/QmXkVz3...（把這個地址給機器 B）
+
+# 啟動訓練
+python run_trainer.py --run_id my_experiment
+```
+
+**機器 B — 加入網路並訓練**
+
+```bash
+python run_trainer.py \
+    --initial_peers /ip4/140.112.x.x/tcp/31337/p2p/QmXkVz3... \
+    --run_id my_experiment
+```
+
+各機器的輸出類似：
+
+```
+[INFO] Loading state from peers
+[INFO] Step #1
+[INFO] Your current contribution: 256 samples
+[INFO] Performance: 12.340 samples/sec
+[INFO] Local loss: 2.34512
+[INFO] Averaging with 2 peers...
+[INFO] Step #2
+```
+
+2 台的限制：
+
+| 項目 | 說明 |
+|------|------|
+| AllReduce | 2 個 peer 完全可以運作 |
+| 容錯性 | 一台掛掉，另一台就孤立（沒有其他 peer 可找） |
+| 網路需求 | 同內網直接用；跨網際網路需有公網 IP 或開 `--use_auto_relay` |
+
+### 協作訓練節點互動圖
+
+```
+機器 A (Bootstrap + Trainer)     機器 B (Trainer)
+─────────────────────────        ────────────────
+hivemind-dht (port 31337)
+  │ 廣播 multiaddr
+  │◄────────────────────────────── 連線加入
+  │
+  │     (各自獨立訓練，累積本地梯度)
+  │
+  │     全網 samples 達到 target_batch_size
+  │◄──────────────────────────────────────────────
+  │            Butterfly AllReduce
+  │──────────────────────────────────────────────►
+  │         (同步梯度，各自 optimizer.step())
+  │
+  │     (繼續下一輪訓練...)
+```
+
+### MoE 分散推論節點互動圖（Petals 風格）
+
+```
+使用者機器                 機器 A                    機器 B
+──────────                 ──────                    ──────
+input tokens               blocks 0~11               blocks 12~23
+     │                          │                         │
+     └── forward ──────────────►│                         │
+                                │── activations ─────────►│
+                                │                         │── output tokens
+                                │◄── output tokens ───────┘
+     ◄── output tokens ─────────┘
+```
+
+---
+
 ## 快速參考
 
 ```python
