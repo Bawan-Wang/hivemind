@@ -19,7 +19,7 @@ print(f"連線到 Peer1: {PEER1_ADDR}\n")
 dht = DHT(
     initial_peers=[PEER1_ADDR],
     start=True,
-    host_maddrs=["/ip4/0.0.0.0/tcp/7778"],
+    host_maddrs=["/ip4/0.0.0.0/tcp/17778"],
 )
 
 tensors = [torch.ones(4) * 3.0, torch.ones(3) * 4.0]
