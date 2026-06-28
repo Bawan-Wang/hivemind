@@ -43,5 +43,6 @@ except Exception as e:
     print(f"\nAllReduce 失敗: {e}")
 finally:
     avg.shutdown()
+    import time; time.sleep(1)
     dht.shutdown()
     print("節點已關閉")
