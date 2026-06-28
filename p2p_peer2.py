@@ -3,10 +3,17 @@ P2P 測試 - 機器 2（在機器 1 印出地址後執行）
 WSL2 Mirrored 模式：直接用 LAN IP，不需要 port forwarding
 用法: python p2p_peer2.py /ip4/<機器1 IP>/tcp/7777/p2p/<PeerID>
 """
+import logging
 import sys
 import torch
 from hivemind.dht import DHT
 from hivemind.averaging import DecentralizedAverager
+
+class _SuppressConnectionReset(logging.Filter):
+    def filter(self, record):
+        return not (record.levelno >= logging.ERROR and "Connection reset by peer" in record.getMessage())
+
+logging.getLogger("hivemind.dht.dht").addFilter(_SuppressConnectionReset())
 
 if len(sys.argv) < 2:
     print("用法: python p2p_peer2.py <機器1的multiaddr>")
