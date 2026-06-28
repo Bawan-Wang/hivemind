@@ -1,5 +1,6 @@
 """
 P2P 測試 - 機器 2（在機器 1 印出地址後執行）
+WSL2 Mirrored 模式：直接用 LAN IP，不需要 port forwarding
 用法: python p2p_peer2.py /ip4/<機器1 IP>/tcp/7777/p2p/<PeerID>
 """
 import sys
@@ -13,7 +14,7 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 PEER1_ADDR = sys.argv[1]
-print(f"連線到: {PEER1_ADDR}\n")
+print(f"連線到 Peer1: {PEER1_ADDR}\n")
 
 dht = DHT(
     initial_peers=[PEER1_ADDR],
@@ -24,7 +25,7 @@ dht = DHT(
 tensors = [torch.ones(4) * 3.0, torch.ones(3) * 4.0]
 print(f"Peer2 平均前: tensors[0]={tensors[0].tolist()}, tensors[1]={tensors[1].tolist()}")
 print(f"理論平均後:   tensors[0]=[2.0,...], tensors[1]=[3.0,...]")
-print("\n發起 AllReduce... (timeout 60s)\n")
+print("\n發起 AllReduce... (timeout 300s)\n")
 
 avg = DecentralizedAverager(
     averaged_tensors=tensors,
@@ -36,7 +37,7 @@ avg = DecentralizedAverager(
 )
 
 try:
-    result = avg.step(timeout=60.0)
+    result = avg.step(timeout=300.0)
     print(f"\nAllReduce 成功! peers: {result}")
     print(f"Peer2 平均後: tensors[0]={tensors[0].tolist()}, tensors[1]={tensors[1].tolist()}")
 except Exception as e:
