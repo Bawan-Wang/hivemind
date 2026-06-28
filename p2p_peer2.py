@@ -9,11 +9,13 @@ import torch
 from hivemind.dht import DHT
 from hivemind.averaging import DecentralizedAverager
 
-class _SuppressConnectionReset(logging.Filter):
+# 關閉時 DHT 的 _run() 對拆除中的 pipe 做最後一次 recv() 會拋例外，
+# 訊息文字不固定，直接擋掉 _run() 來源的 ERROR（見 peer1 註解）。
+class _SuppressShutdownPipeError(logging.Filter):
     def filter(self, record):
-        return not (record.levelno >= logging.ERROR and "Connection reset by peer" in record.getMessage())
+        return not (record.levelno >= logging.ERROR and record.funcName == "_run")
 
-logging.getLogger("hivemind.dht.dht").addFilter(_SuppressConnectionReset())
+logging.getLogger("hivemind.dht.dht").addFilter(_SuppressShutdownPipeError())
 
 if len(sys.argv) < 2:
     print("用法: python p2p_peer2.py <機器1的multiaddr>")

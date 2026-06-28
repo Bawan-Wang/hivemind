@@ -7,13 +7,16 @@ import torch
 from hivemind.dht import DHT
 from hivemind.averaging import DecentralizedAverager
 
-# DHT 是 ForkProcess，子 process 會繼承此 filter，
-# 攔截關閉時的 ConnectionResetError 雜訊（pipe 正常關閉的副作用）
-class _SuppressConnectionReset(logging.Filter):
+# DHT 是 ForkProcess，子 process 會繼承此 filter。
+# 關閉時 DHT 的 _run() 迴圈會對正在拆除的 pipe 做最後一次 recv()，
+# 因傳遞 fd 的 Unix socket 已被關閉而拋例外（訊息文字不固定：
+# Connection reset by peer / No such file or directory ...）。
+# 直接擋掉 _run() 來源的 ERROR，不依賴訊息文字。
+class _SuppressShutdownPipeError(logging.Filter):
     def filter(self, record):
-        return not (record.levelno >= logging.ERROR and "Connection reset by peer" in record.getMessage())
+        return not (record.levelno >= logging.ERROR and record.funcName == "_run")
 
-logging.getLogger("hivemind.dht.dht").addFilter(_SuppressConnectionReset())
+logging.getLogger("hivemind.dht.dht").addFilter(_SuppressShutdownPipeError())
 
 PORT = 7777
 
